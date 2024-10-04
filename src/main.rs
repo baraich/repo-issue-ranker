@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use chrono::{TimeZone, Utc};
 use dotenv::dotenv;
 use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,39 @@ async fn get_issues(owner: &str, repo: &str) -> Vec<Issue> {
     let response = send_request(&url).await;
     let response = match response {
         Ok(res) if res.status().is_success() => res,
+        Ok(res) if !res.status().is_success() => {
+            println!("Exited with HTTP status code: {:?}", res.status());
+            println!("Please try again later {}!", {
+                let timestamp_str = res
+                    .headers()
+                    .get("x-ratelimit-reset")
+                    .expect("Unable to retrive the unix time remaining")
+                    .to_str();
+
+                match timestamp_str {
+                    Err(_) => "in sometime".to_string(),
+                    Ok(timestamp_str) => {
+                        let timestamp = timestamp_str
+                            .parse::<i64>()
+                            .expect("Failed to convert timestamp to number");
+                        let current_time = Utc::now();
+                        let future_timestamp = Utc
+                            .timestamp_opt(timestamp, 0)
+                            .single()
+                            .expect("Invalid timestamp");
+
+                        let awaiting_period = future_timestamp - current_time;
+
+                        if awaiting_period.num_minutes() > 0 {
+                            format!("after {} minute(s)", awaiting_period.num_minutes())
+                        } else {
+                            format!("after {} second(s)", awaiting_period.num_seconds())
+                        }
+                    }
+                }
+            });
+            return Vec::new();
+        }
         _ => return Vec::new(),
     };
 
@@ -79,8 +113,8 @@ async fn main() {
     // Loading the environment variables in program.
     dotenv().ok();
 
-    let owner: &str = "facebook";
-    let repo: &str = "react";
+    let owner: &str = "angular";
+    let repo: &str = "angular";
     let mut map = HashMap::new();
 
     let issues = get_issues(owner, repo).await;
